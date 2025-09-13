@@ -28,11 +28,15 @@ class hh_API(JobAPI):
         response.raise_for_status()
         return response
 
-    def load_vacancies(self, keyword: str, per_page:int, page: int):
+    def get_vacancies(self, keyword: str, page: int):
+        """Реализация абстрактного метода"""
+        return self.load_vacancies(keyword, per_page=100, page=page)
+
+    def load_vacancies(self, keyword: str, per_page: int, page: int):
         """Метод для получения вакансий по ключевому слову"""
         self._connect()
 
-        params ={
+        params = {
             'text': keyword,
             'per_page': per_page,
             'page': page

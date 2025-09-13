@@ -53,7 +53,7 @@ class TestHHAPI:
         assert isinstance(api, hh_API)
         assert api._hh_API__session is None
 
-    @patch('your_module.requests.Session')  # замените your_module
+    @patch('src.hh_API.requests.Session')  # замените your_module
     def test_connect_method(self, mock_session_class, hh_api):
         """Тест метода _connect"""
         # Настройка моков
