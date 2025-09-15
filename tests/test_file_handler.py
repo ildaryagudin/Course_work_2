@@ -1,248 +1,170 @@
 import pytest
 import json
 import os
-from unittest.mock import mock_open, patch
-from src.file_handler import FileHandler, FileHandlerJSON  # замените your_module на имя вашего модуля
-
-
-class TestFileHandler:
-    """Тесты для абстрактного класса FileHandler"""
-
-    def test_file_handler_is_abstract(self):
-        """Тест, что FileHandler является абстрактным классом"""
-        with pytest.raises(TypeError):
-            FileHandler("test.json")
-
-    def test_file_handler_has_abstract_methods(self):
-        """Тест, что FileHandler имеет абстрактные методы"""
-        assert hasattr(FileHandler, 'add_vacancy')
-        assert hasattr(FileHandler, 'get_vacancies')
-        assert FileHandler.add_vacancy.__isabstractmethod__
-        assert FileHandler.get_vacancies.__isabstractmethod__
+import tempfile
+from src.file_handler import FileHandlerJSON
+from src.vacancy import Vacancy
 
 
 class TestFileHandlerJSON:
-    """Тесты для класса FileHandlerJSON"""
+    @pytest.fixture
+    def temp_file(self):
+        """Фикстура для создания временного файла"""
+        with tempfile.NamedTemporaryFile(mode='w', suffix='.json', delete=False) as f:
+            f.write('{"items": []}')
+            temp_filename = f.name
+
+        yield temp_filename
+
+        # Удаляем временный файл после теста
+        if os.path.exists(temp_filename):
+            os.unlink(temp_filename)
 
     @pytest.fixture
-    def sample_vacancies_data(self):
-        """Фикстура с примером данных вакансий"""
-        return {
-            "items": [
-                {
-                    "name": "Python Developer",
-                    "city": "Москва",
-                    "salary": {"from": 100000, "to": 150000, "currency": "RUB"},
-                    "experience": "1-3 года",
-                    "url": "https://hh.ru/vacancy/123"
-                },
-                {
-                    "name": "Data Scientist Стажер",
-                    "city": "Санкт-Петербург",
-                    "salary": None,
-                    "experience": "нет опыта",
-                    "url": "https://hh.ru/vacancy/456"
-                },
-                {
-                    "name": "Java Developer",
-                    "city": "Москва",
-                    "salary": {"from": 120000, "to": 180000, "currency": "RUB"},
-                    "experience": "3-6 лет",
-                    "url": "https://hh.ru/vacancy/789"
-                }
-            ]
-        }
+    def sample_vacancies(self):
+        """Фикстура для создания тестовых вакансий"""
+        return [
+            Vacancy(
+                name="Python Developer",
+                city="Москва",
+                url="https://hh.ru/vacancy/1",
+                salary={"from": 100000, "to": 150000, "currency": "RUR"},
+                vacancy_id="1"
+            ),
+            Vacancy(
+                name="Java Developer",
+                city="Санкт-Петербург",
+                url="https://hh.ru/vacancy/2",
+                salary={"from": 120000, "to": 180000, "currency": "RUR"},
+                vacancy_id="2"
+            ),
+            Vacancy(
+                name="Data Scientist",
+                city="Москва",
+                url="https://hh.ru/vacancy/3",
+                salary=None,
+                vacancy_id="3"
+            )
+        ]
 
-    @pytest.fixture
-    def sample_vacancies_json(self, sample_vacancies_data):
-        """Фикстура с JSON строкой вакансий"""
-        return json.dumps(sample_vacancies_data)
+    def test_init_creates_directory(self, temp_file):
+        """Тест создания директории при инициализации"""
+        directory = os.path.dirname(temp_file)
+        if os.path.exists(directory):
+            os.rmdir(directory)
 
-    @pytest.fixture
-    def file_handler(self, tmp_path):
-        """Фикстура для создания FileHandlerJSON с временным файлом"""
-        test_file = tmp_path / "vacancies.json"
-        return FileHandlerJSON(str(test_file))
+        handler = FileHandlerJSON(temp_file)
+        assert os.path.exists(directory)
 
-    def test_file_handler_json_inheritance(self):
-        """Тест, что FileHandlerJSON наследуется от FileHandler"""
-        assert issubclass(FileHandlerJSON, FileHandler)
+    def test_add_vacancy(self, temp_file, sample_vacancies):
+        """Тест добавления вакансии"""
+        handler = FileHandlerJSON(temp_file)
+        result = handler.add_vacancy(sample_vacancies[0])
 
-    def test_file_handler_json_instantiation(self, tmp_path):
-        """Тест создания экземпляра FileHandlerJSON"""
-        test_file = tmp_path / "vacancies.json"
-        handler = FileHandlerJSON(str(test_file))
+        assert result is True
 
-        assert isinstance(handler, FileHandlerJSON)
-        assert handler._FileHandler__filename == str(test_file)
+        # Проверяем, что вакансия добавлена
+        vacancies = handler.get_vacancies()
+        assert len(vacancies) == 1
+        assert vacancies[0].id == "1"
 
-    def test_file_handler_json_default_filename(self):
-        """Тест создания экземпляра с filename по умолчанию"""
-        handler = FileHandlerJSON()
-        assert handler._FileHandler__filename == './data/vacancies.json'
+    def test_add_duplicate_vacancy(self, temp_file, sample_vacancies):
+        """Тест добавления дубликата вакансии"""
+        handler = FileHandlerJSON(temp_file)
+        handler.add_vacancy(sample_vacancies[0])
+        result = handler.add_vacancy(sample_vacancies[0])  # Пытаемся добавить ту же вакансию
 
-    def test_get_vacancies_file_not_exists(self, file_handler):
-        """Тест получения вакансий при отсутствии файла"""
-        result = file_handler.get_vacancies()
-        assert result == []
+        assert result is False
 
-    @patch('builtins.open', new_callable=mock_open)
-    @patch('os.path.exists', return_value=True)
-    def test_get_vacancies_empty_file(self, mock_exists, mock_file, file_handler):
+        # Проверяем, что вакансия не добавилась повторно
+        vacancies = handler.get_vacancies()
+        assert len(vacancies) == 1
+
+    def test_add_vacancies(self, temp_file, sample_vacancies):
+        """Тест добавления нескольких вакансий"""
+        handler = FileHandlerJSON(temp_file)
+        added_count = handler.add_vacancies(sample_vacancies)
+
+        assert added_count == 3
+
+        vacancies = handler.get_vacancies()
+        assert len(vacancies) == 3
+
+    def test_get_vacancies_empty(self, temp_file):
         """Тест получения вакансий из пустого файла"""
-        mock_file.return_value.read.return_value = '{}'
+        handler = FileHandlerJSON(temp_file)
+        vacancies = handler.get_vacancies()
 
-        result = file_handler.get_vacancies()
-        assert result == {}
+        assert vacancies == []
 
-    @patch('builtins.open', new_callable=mock_open)
-    @patch('os.path.exists', return_value=True)
-    def test_get_vacancies_without_criteria(self, mock_exists, mock_file, file_handler, sample_vacancies_json):
-        """Тест получения всех вакансий без критериев"""
-        mock_file.return_value.read.return_value = sample_vacancies_json
+    def test_get_vacancies_with_data(self, temp_file, sample_vacancies):
+        """Тест получения вакансий из файла с данными"""
+        handler = FileHandlerJSON(temp_file)
+        handler.add_vacancies(sample_vacancies)
 
-        result = file_handler.get_vacancies()
+        vacancies = handler.get_vacancies()
+        assert len(vacancies) == 3
 
-        assert isinstance(result, dict)
-        assert 'items' in result
-        assert len(result['items']) == 3
+    def test_get_vacancies_with_filter(self, temp_file, sample_vacancies):
+        """Тест получения вакансий с фильтрацией"""
+        handler = FileHandlerJSON(temp_file)
+        handler.add_vacancies(sample_vacancies)
 
-    @patch('builtins.open', new_callable=mock_open)
-    @patch('os.path.exists', return_value=True)
-    def test_get_vacancies_with_name_criteria(self, mock_exists, mock_file, file_handler, sample_vacancies_json):
-        """Тест фильтрации вакансий по имени"""
-        mock_file.return_value.read.return_value = sample_vacancies_json
+        # Фильтр по городу
+        moscow_vacancies = handler.get_vacancies(city="Москва")
+        assert len(moscow_vacancies) == 2
 
-        result = file_handler.get_vacancies(name="Стажер")
+        # Фильтр по названию
+        python_vacancies = handler.get_vacancies(name="Python")
+        assert len(python_vacancies) == 1
+        assert python_vacancies[0].name == "Python Developer"
 
-        assert len(result) == 1
-        assert result[0]['name'] == "Data Scientist Стажер"
+    def test_delete_vacancy(self, temp_file, sample_vacancies):
+        """Тест удаления вакансии"""
+        handler = FileHandlerJSON(temp_file)
+        handler.add_vacancies(sample_vacancies)
 
-    @patch('builtins.open', new_callable=mock_open)
-    @patch('os.path.exists', return_value=True)
-    def test_get_vacancies_with_city_criteria(self, mock_exists, mock_file, file_handler, sample_vacancies_json):
-        """Тест фильтрации вакансий по городу"""
-        mock_file.return_value.read.return_value = sample_vacancies_json
+        # Удаляем вакансию
+        result = handler.delete_vacancy("1")
+        assert result is True
 
-        result = file_handler.get_vacancies(city="Москва")
+        vacancies = handler.get_vacancies()
+        assert len(vacancies) == 2
+        assert all(vac.id != "1" for vac in vacancies)
 
-        assert len(result) == 2
-        assert all(vacancy['city'] == 'Москва' for vacancy in result)
+    def test_delete_nonexistent_vacancy(self, temp_file, sample_vacancies):
+        """Тест удаления несуществующей вакансии"""
+        handler = FileHandlerJSON(temp_file)
+        handler.add_vacancies(sample_vacancies)
 
-    @patch('builtins.open', new_callable=mock_open)
-    @patch('os.path.exists', return_value=True)
-    def test_get_vacancies_with_multiple_criteria(self, mock_exists, mock_file, file_handler, sample_vacancies_json):
-        """Тест фильтрации вакансий по нескольким критериям"""
-        mock_file.return_value.read.return_value = sample_vacancies_json
+        result = handler.delete_vacancy("999")
+        assert result is False
 
-        result = file_handler.get_vacancies(city="Москва", name="Python")
+        vacancies = handler.get_vacancies()
+        assert len(vacancies) == 3
 
-        assert len(result) == 1
-        assert result[0]['name'] == "Python Developer"
-        assert result[0]['city'] == "Москва"
+    def test_clear_all(self, temp_file, sample_vacancies):
+        """Тест очистки всех вакансий"""
+        handler = FileHandlerJSON(temp_file)
+        handler.add_vacancies(sample_vacancies)
 
-    @patch('builtins.open', new_callable=mock_open)
-    @patch('os.path.exists', return_value=True)
-    def test_get_vacancies_no_matches(self, mock_exists, mock_file, file_handler, sample_vacancies_json):
-        """Тест фильтрации вакансий без совпадений"""
-        mock_file.return_value.read.return_value = sample_vacancies_json
+        handler.clear_all()
 
-        result = file_handler.get_vacancies(name="NonExistentPosition")
+        vacancies = handler.get_vacancies()
+        assert vacancies == []
 
-        assert result == []
+    def test_read_corrupted_file(self):
+        """Тест чтения поврежденного файла"""
+        with tempfile.NamedTemporaryFile(mode='w', suffix='.json', delete=False) as f:
+            f.write('{"corrupted": data}')  # Невалидный JSON
+            temp_filename = f.name
 
-    @patch('builtins.open', new_callable=mock_open)
-    @patch('os.path.exists', return_value=True)
-    def test_get_vacancies_partial_match(self, mock_exists, mock_file, file_handler, sample_vacancies_json):
-        """Тест частичного совпадения при фильтрации"""
-        mock_file.return_value.read.return_value = sample_vacancies_json
+        try:
+            handler = FileHandlerJSON(temp_filename)
+            vacancies = handler.get_vacancies()
 
-        result = file_handler.get_vacancies(name="Developer")
-
-        assert len(result) == 2
-        assert all("Developer" in vacancy['name'] for vacancy in result)
-
-    @patch('builtins.open', new_callable=mock_open)
-    @patch('os.path.exists', return_value=True)
-    def test_get_vacancies_case_sensitivity(self, mock_exists, mock_file, file_handler, sample_vacancies_json):
-        """Тест чувствительности к регистру при фильтрации"""
-        mock_file.return_value.read.return_value = sample_vacancies_json
-
-        result = file_handler.get_vacancies(name="python")
-
-        assert len(result) == 0  # Должно быть 0, так как "Python" с большой буквы
-
-    @patch('builtins.open', new_callable=mock_open)
-    @patch('os.path.exists', return_value=True)
-    def test_get_vacancies_with_empty_items(self, mock_exists, mock_file, file_handler):
-        """Тест обработки файла с пустым items"""
-        empty_data = {'items': []}
-        mock_file.return_value.read.return_value = json.dumps(empty_data)
-
-        result = file_handler.get_vacancies(name="Python")
-        assert result == []
-
-    @patch('builtins.open', new_callable=mock_open)
-    @patch('os.path.exists', return_value=True)
-    def test_get_vacancies_malformed_json(self, mock_exists, mock_file, file_handler):
-        """Тест обработки некорректного JSON"""
-        mock_file.return_value.read.return_value = 'invalid json'
-
-        with pytest.raises(json.JSONDecodeError):
-            file_handler.get_vacancies()
-
-    def test_add_vacancy_not_implemented(self, file_handler):
-        """Тест, что add_vacancy не реализован"""
-        with pytest.raises(NotImplementedError):
-            file_handler.add_vacancy({})
-
-    def test_update_vacancy_not_implemented(self, file_handler):
-        """Тест, что update_vacancy не реализован"""
-        with pytest.raises(NotImplementedError):
-            file_handler.update_vacancy()
-
-    def test_delete_vacancy_not_implemented(self, file_handler):
-        """Тест, что delete_vacancy не реализован"""
-        with pytest.raises(NotImplementedError):
-            file_handler.delete_vacancy()
-
-
-@pytest.mark.integration
-class TestFileHandlerJSONIntegration:
-    """Интеграционные тесты с реальными файлами"""
-
-    def test_get_vacancies_with_real_file(self, tmp_path):
-        """Тест с реальным файлом"""
-        test_file = tmp_path / "test_vacancies.json"
-        test_data = {
-            "items": [
-                {"name": "Test Developer", "city": "Test City"},
-                {"name": "Another Test", "city": "Another City"}
-            ]
-        }
-
-        # Создаем реальный файл
-        with open(test_file, 'w') as f:
-            json.dump(test_data, f)
-
-        # Тестируем
-        handler = FileHandlerJSON(str(test_file))
-        result = handler.get_vacancies(name="Test")
-
-        assert len(result) == 1
-        assert result[0]['name'] == "Test Developer"
-
-    def test_get_vacancies_file_not_exists_integration(self, tmp_path):
-        """Интеграционный тест с несуществующим файлом"""
-        test_file = tmp_path / "non_existent.json"
-        handler = FileHandlerJSON(str(test_file))
-
-        result = handler.get_vacancies()
-        assert result == []
-
-        # Проверяем, что файл не был создан
-        assert not os.path.exists(test_file)
-
-
-if __name__ == "__main__":
-    pytest.main([__file__, "-v"])
+            # Должен вернуть пустой список при ошибке чтения
+            assert vacancies == []
+        finally:
+            if os.path.exists(temp_filename):
+                os.unlink(temp_filename)
