@@ -1,62 +1,73 @@
-import abc
 import requests
+from abc import ABC, abstractmethod
+from src.vacancy import Vacancy
 
 
-class JobAPI(abc.ABC):
-    @abc.abstractmethod
-    def _connect(self):
-        """Метод для подключения к API"""
+class JobAPI(ABC):
+    @abstractmethod
+    def get_vacancies(self, keyword: str, amount: int):
         pass
-
-    @abc.abstractmethod
-    def get_vacancies(self, keyword: str, page:int):
-        """Метод для получения вакансий по ключевому слову"""
-        pass
-
 
 
 class hh_API(JobAPI):
     BASE_URL = 'https://api.hh.ru/vacancies'
 
     def __init__(self):
-        self.__session = None
+        self.session = requests.Session()
 
-    def _connect(self):
-        """Метод для подключения к API"""
-        self.__session = requests.Session()
-        response = self.__session.get(self.BASE_URL)
-        response.raise_for_status()
-        return response
+    def get_vacancies(self, keyword: str, amount: int):
+        """Получение вакансий по ключевому слову"""
+        vacancies = []
+        page = 0
+        per_page = min(100, amount)
 
-    def get_vacancies(self, keyword: str, page: int):
-        """Реализация абстрактного метода"""
-        return self.load_vacancies(keyword, per_page=100, page=page)
+        while len(vacancies) < amount:
+            try:
+                page_vacancies = self._load_page(keyword, page, per_page)
+                if not page_vacancies:
+                    break
 
-    def load_vacancies(self, keyword: str, per_page: int, page: int):
-        """Метод для получения вакансий по ключевому слову"""
-        self._connect()
+                vacancies.extend(page_vacancies)
+                page += 1
 
+                # Если на странице меньше вакансий, чем запрошено, выходим
+                if len(page_vacancies) < per_page:
+                    break
+
+            except Exception as e:
+                print(f"Ошибка при загрузке страницы {page}: {e}")
+                break
+
+        return vacancies[:amount]
+
+    def _load_page(self, keyword: str, page: int, per_page: int):
+        """Загрузка одной страницы вакансий"""
         params = {
             'text': keyword,
             'per_page': per_page,
-            'page': page
+            'page': page,
+            'only_with_salary': True
         }
 
-        response = self.__session.get(self.BASE_URL, params=params)
-        response.raise_for_status()
-        vacancies = response.json().get('items', [])
+        try:
+            response = self.session.get(self.BASE_URL, params=params, timeout=10)
+            response.raise_for_status()
+            data = response.json()
 
-        return [
-            {
-                'name': vacancy['name'],
-                'city': vacancy['area']['name'],
-                'url': vacancy['url'],
-                "salary": vacancy['salary'],
-                'id': vacancy['id']
-            }
-            for vacancy in vacancies
-        ]
+            return [
+                Vacancy(
+                    name=vacancy['name'],
+                    city=vacancy['area']['name'],
+                    url=vacancy['url'],
+                    salary=vacancy['salary'],
+                    vacancy_id=vacancy['id']
+                )
+                for vacancy in data.get('items', [])
+            ]
 
-
-
-
+        except requests.RequestException as e:
+            print(f"Ошибка запроса: {e}")
+            return []
+        except KeyError as e:
+            print(f"Ошибка обработки данных: {e}")
+            return []
